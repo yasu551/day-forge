@@ -4,11 +4,13 @@ module Authentication
   included do
     before_action :require_authentication
     helper_method :authenticated?
+
+    attr_reader :current_person_class
   end
 
   class_methods do
-    def authentication_for(person_class, new_person_session_url:, person_root_url:)
-      @person_class = person_class
+    def authentication_for(current_person_class, new_person_session_url:, person_root_url:)
+      @current_person_class = current_person_class
       @new_person_session_url = new_person_session_url
       @person_root_url = person_root_url
     end
@@ -29,7 +31,7 @@ module Authentication
   end
 
   def resume_session
-    current_class.send(underscored_session_name) || current_class.send("#{underscored_session_name}=", find_session_by_cookie)
+    current_person_class.send(underscored_session_name) || current_person_class.send("#{underscored_session_name}=", find_session_by_cookie)
   end
 
   def find_session_by_cookie
@@ -48,22 +50,18 @@ module Authentication
   def start_new_session_for(person)
     sessions = person.send("#{underscored_session_name.pluralize}")
     sessions.create!(user_agent: request.user_agent, ip_address: request.remote_ip).tap do |session|
-      current_class.send("#{underscored_session_name}=", session)
+      current_person_class.send("#{underscored_session_name}=", session)
       cookies.signed.permanent[:session_id] = { value: session.id, httponly: true, same_site: :lax }
     end
   end
 
   def terminate_session
-    current_class.send(underscored_session_name).destroy
+    current_person_class.send(underscored_session_name).destroy
     cookies.delete(:session_id)
   end
 
-  def current_class
-    "Current#{@person_class}".constantize
-  end
-
   def session_class
-    "#{@person_class}Session".constantize
+    "#{current_person_class.to_s.delete_prefix("Current")}Session".constantize
   end
 
   def underscored_session_name
