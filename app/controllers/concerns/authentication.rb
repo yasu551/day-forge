@@ -7,6 +7,12 @@ module Authentication
   end
 
   class_methods do
+    def authentication_for(person_class, new_person_session_url:, person_root_url:)
+      @person_class = person_class
+      @new_person_session_url = new_person_session_url
+      @person_root_url = person_root_url
+    end
+
     def allow_unauthenticated_access(**options)
       skip_before_action :require_authentication, **options
     end
@@ -23,31 +29,44 @@ module Authentication
   end
 
   def resume_session
-    Current.session ||= find_session_by_cookie
+    current_class.send(underscored_session_name) || current_class.send("#{underscored_session_name}=", find_session_by_cookie)
   end
 
   def find_session_by_cookie
-    Session.find_by(id: cookies.signed[:session_id])
+    session_class.find_by(id: cookies.signed[:session_id])
   end
 
   def request_authentication
     session[:return_to_after_authenticating] = request.url
-    redirect_to new_session_path
+    redirect_to @new_person_session_url
   end
 
   def after_authentication_url
-    session.delete(:return_to_after_authenticating) || root_url
+    session.delete(:return_to_after_authenticating) || @person_root_url
   end
 
-  def start_new_session_for(user)
-    user.sessions.create!(user_agent: request.user_agent, ip_address: request.remote_ip).tap do |session|
-      Current.session = session
+  def start_new_session_for(person)
+    sessions = person.send("#{underscored_session_name.pluralize}")
+    sessions.create!(user_agent: request.user_agent, ip_address: request.remote_ip).tap do |session|
+      current_class.send("#{underscored_session_name}=", session)
       cookies.signed.permanent[:session_id] = { value: session.id, httponly: true, same_site: :lax }
     end
   end
 
   def terminate_session
-    Current.session.destroy
+    current_class.send(underscored_session_name).destroy
     cookies.delete(:session_id)
+  end
+
+  def current_class
+    "Current#{@person_class}".constantize
+  end
+
+  def session_class
+    "#{@person_class}Session".constantize
+  end
+
+  def underscored_session_name
+    session_class.name.underscore
   end
 end
